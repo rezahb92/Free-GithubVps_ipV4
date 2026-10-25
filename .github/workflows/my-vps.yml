@@ -38,7 +38,10 @@ jobs:
             exit 1
           fi
 
-          sudo install -d -m 700 -o admin -g admin /home/admin/.ssh
+          sudo groupadd -f admin
+          if ! id admin >/dev/null 2>&1; then
+          sudo useradd -m -g admin -s /bin/bash admin
+          fi
           printf '%s\n' "$SSH_PUBLIC_KEY" | sudo tee /home/admin/.ssh/authorized_keys >/dev/null
           sudo chown admin:admin /home/admin/.ssh/authorized_keys
           sudo chmod 600 /home/admin/.ssh/authorized_keys
