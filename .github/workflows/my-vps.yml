@@ -19,7 +19,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y openssh-server
-          sudo useradd -m -s /bin/bash admin
+          sudo useradd -m -g admin -s /bin/bash admin
           echo "admin:admin123" | sudo chpasswd
           sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
           sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
