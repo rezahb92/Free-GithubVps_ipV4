@@ -18,14 +18,21 @@ jobs:
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
-      - name: Install SSH and configure user
+      - name: Install and configure VPS
         env:
           SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+          VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
         run: |
           set -euo pipefail
 
+          if [ -z "$SSH_PUBLIC_KEY" ] || [ -z "$VPS_PASSWORD" ]; then
+            echo "Missing SSH_PUBLIC_KEY or VPS_PASSWORD secret"
+            exit 1
+          fi
+
           sudo apt-get update
-          sudo apt-get install -y openssh-server
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            openssh-server xfce4 xfce4-goodies xrdp dbus-x11
 
           sudo groupadd -f admin
 
@@ -33,10 +40,8 @@ jobs:
             sudo useradd -m -g admin -s /bin/bash admin
           fi
 
-          if [ -z "$SSH_PUBLIC_KEY" ]; then
-            echo "Missing SSH_PUBLIC_KEY repository secret"
-            exit 1
-          fi
+          sudo usermod -aG sudo admin
+          printf 'admin:%s\n' "$VPS_PASSWORD" | sudo chpasswd
 
           sudo install -d -m 700 -o admin -g admin /home/admin/.ssh
           printf '%s\n' "$SSH_PUBLIC_KEY" | sudo tee /home/admin/.ssh/authorized_keys >/dev/null
@@ -46,13 +51,28 @@ jobs:
           echo 'PasswordAuthentication no' | sudo tee /etc/ssh/sshd_config.d/99-vps.conf
           echo 'PermitRootLogin no' | sudo tee -a /etc/ssh/sshd_config.d/99-vps.conf
 
+          sudo install -d -o admin -g admin /home/admin
+          sudo -u admin sh -c 'echo startxfce4 > /home/admin/.xsession'
+
           sudo mkdir -p /run/sshd
           sudo sshd -t
           sudo systemctl enable --now ssh
 
-      - name: Show Tailscale IP
-        run: |
-          tailscale ip -4
+          TS_IP="$(tailscale ip -4 | head -n1)"
+          if [ -z "$TS_IP" ]; then
+            echo "Tailscale IP not found"
+            exit 1
+          fi
+
+          sudo sed -i \
+            -e "s|^port=.*|port=tcp://${TS_IP}:3389|" \
+            /etc/xrdp/xrdp.ini
+
+          sudo systemctl enable --now xrdp
+          sudo systemctl restart xrdp
+
+          echo "Tailscale IP: $TS_IP"
+          echo "RDP port: 3389 (bound to Tailscale IP)"
 
       - name: Keep alive (6 hours)
         run: sleep 21600
