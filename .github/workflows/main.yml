@@ -3,6 +3,9 @@ name: Tailscale VPS
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   vps:
     runs-on: ubuntu-latest
@@ -15,18 +18,38 @@ jobs:
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
-      - name: Install SSH server and create user
+      - name: Install SSH and configure user
+        env:
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
         run: |
+          set -euo pipefail
+
           sudo apt-get update
           sudo apt-get install -y openssh-server
-          sudo useradd -m -s /bin/bash admin
-          echo "admin:admin123" | sudo chpasswd
-          sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo systemctl restart ssh
-          sudo systemctl start ssh
 
-      - name: Get Tailscale IP
+          sudo groupadd -f admin
+
+          if ! id admin >/dev/null 2>&1; then
+            sudo useradd -m -g admin -s /bin/bash admin
+          fi
+
+          if [ -z "$SSH_PUBLIC_KEY" ]; then
+            echo "Missing SSH_PUBLIC_KEY repository secret"
+            exit 1
+          fi
+
+          sudo install -d -m 700 -o admin -g admin /home/admin/.ssh
+          printf '%s\n' "$SSH_PUBLIC_KEY" | sudo tee /home/admin/.ssh/authorized_keys >/dev/null
+          sudo chown admin:admin /home/admin/.ssh/authorized_keys
+          sudo chmod 600 /home/admin/.ssh/authorized_keys
+
+          echo 'PasswordAuthentication no' | sudo tee /etc/ssh/sshd_config.d/99-vps.conf
+          echo 'PermitRootLogin no' | sudo tee -a /etc/ssh/sshd_config.d/99-vps.conf
+
+          sudo sshd -t
+          sudo systemctl enable --now ssh
+
+      - name: Show Tailscale IP
         run: |
           tailscale ip -4
 
